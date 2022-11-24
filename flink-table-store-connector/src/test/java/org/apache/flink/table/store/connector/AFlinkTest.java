@@ -2,6 +2,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -18,6 +19,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.codegen.CodeGenLoader;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
+import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -35,18 +37,12 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import static org.apache.flink.table.store.CoreOptions.BUCKET;
-import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
-import static org.apache.flink.table.store.CoreOptions.PATH;
-import static org.apache.flink.table.store.CoreOptions.WRITE_MODE;
-import static org.apache.flink.table.store.file.WriteMode.CHANGE_LOG;
-
 
 /*
     运行时，需要 codegen 类，该类可以直接编译出来：
@@ -65,11 +61,11 @@ public class AFlinkTest {
     dbName = "db";
     tbName = "tb5";
     parallelism = 1;
-    isStream = false;
+    isStream = true;
 
     dbPath = dbName + ".db";
     warehouse = "file:///Users/wuwenchi/github/flink-table-store/warehouse/";
-    tableLocation = "file:///Users/wuwenchi/github/flink-table-store/warehouse/" + dbPath + "/" + tbName;
+    tableLocation = warehouse + dbPath + "/" + tbName;
     IDENTIFIER = ObjectIdentifier.of("catalog", dbName, tbName);
     getFlinkEnv();
   }
@@ -90,7 +86,7 @@ public class AFlinkTest {
   public static String dbName;
   public static String dbPath;
   public static String tbName;
-  public static int parallelism = 1;
+  public static int parallelism;
   public static boolean isStream;
   public static StreamExecutionEnvironment env;
   public static StreamTableEnvironment tEnv;
@@ -110,7 +106,9 @@ public class AFlinkTest {
           getGenRowData("+I", 1, 1, "a", "v3"),
           getGenRowData("+I", 1, 2, "a", "v3"),
           getGenRowData("+I", 4, 1, "a", "v3"),
-          getGenRowData("+I", 3, 2, "a", "v4"));
+          getGenRowData("-D", 4, 2, "a", "v3"),
+          getGenRowData("-D", 3, 1, "a", "v3"),
+          getGenRowData("-D", 3, 2, "a", "v4"));
 
   public static SerializableRowData getGenRowData(String opt, int id1, int id2, String par1, String value) {
     RowKind kind = null;
@@ -167,23 +165,85 @@ public class AFlinkTest {
         "PARTITIONED BY (par1) \n" +
         "WITH ( " + getCfgString() + ") \n" +
         "");
-    tEnv.executeSql("" +
-        "INSERT INTO " + tbName + " VALUES \n" +
-        "(7, 6, 'a', 'b', 'v1')," +
-        "(5, 7, 'a', 'b', 'v1')" +
-        ";");
+    ArrayList<String> strings = new ArrayList<>();
+    strings.add("(3, 1, 'a', 'b', 'v1')");
+    strings.add("(2, 1, 'a', 'b', 'v1')");
+    strings.add("(1, 1, 'a', 'b', 'v1')");
+    strings.add("(9, 1, 'a', 'b', 'v1')");
+    strings.add("(5, 1, 'a', 'b', 'v1')");
+
+    strings.add("(13, 2, 'a', 'b', 'v1')");
+    strings.add("(2, 2, 'a', 'b', 'v1')");
+    strings.add("(1, 2, 'a', 'b', 'v1')");
+    strings.add("(9, 2, 'a', 'b', 'v1')");
+//    strings.add("(6, 7, 'a', 'b', 'v1')");
+//    strings.add("(1, 7, 'a', 'b', 'v1')");
+//    tEnv.executeSql("" +
+//        "INSERT INTO " + tbName + " VALUES \n" +
+//        "(7, 6, 'a', 'b', 'v1')," +
+//        "(3, 7, 'a', 'b', 'v1')" +
+//        ";");
+    strings.forEach(s -> {
+      tEnv.executeSql("" +
+        "INSERT INTO " + tbName + " VALUES " + s + ";");
+    });
 
     tEnv.executeSql("SELECT * FROM " + tbName).print();
   }
 
+  @Test
+  public void re() {
+    tEnv.executeSql("" +
+        "CREATE TABLE IF NOT EXISTS " + tbName + " (\n" +
+        "   id1 INT,\n" +
+        "   id2 INT,\n" +
+        "   par1 STRING,\n" +
+        "   par2 STRING,\n" +
+        "   val STRING\n" +
+//        "   PRIMARY KEY (id1, par1) NOT ENFORCED\n" +
+        ") \n" +
+        "PARTITIONED BY (par1) \n" +
+        "WITH ( " + getCfgString() + ") \n" +
+        "");
+    ArrayList<String> strings = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      strings.add("(" + i + ", 1, 'a', 'adf;bwei;qeivjq;eivjw;oijadsivja;sdoivja', 'v;eina;wiejgawvna;weifawefaefjoijwaef;sdf')");
+    }
+//    strings.forEach(s -> {
+//      tEnv.executeSql("" +
+//        "INSERT INTO " + tbName + " VALUES " + s + ";");
+//    });
+//    tEnv.executeSql("" +
+//        "INSERT INTO " + tbName + " VALUES (1,1,'a','a','b'),(2,1,'a','a','b') ;");
+
+    tEnv.executeSql("SELECT * FROM " + tbName).print();
+//    tEnv.executeSql("SELECT * FROM " + tbName+"$snapshots").print();
+//    tEnv.executeSql("SELECT * FROM " + tbName+"$options").print();
+  }
+
 
   public static Configuration getConf() {
-    Configuration options = new Configuration();
-    options.set(BUCKET, 1);
-    options.set(PATH, tableLocation);
-    options.set(FILE_FORMAT, "avro");
-    options.set(WRITE_MODE, CHANGE_LOG);
-    return options;
+    Configuration opt = new Configuration();
+    opt.set(CoreOptions.BUCKET, 1);
+    opt.set(CoreOptions.PATH, tableLocation);
+    opt.set(CoreOptions.FILE_FORMAT, "avro");
+    opt.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+//    opt.set(WRITE_MODE, WriteMode.APPEND_ONLY);
+
+    opt.setBoolean(CoreOptions.COMMIT_FORCE_COMPACT, true);
+    // append only compaction
+    opt.setInteger(CoreOptions.COMPACTION_MIN_FILE_NUM, 1);
+    opt.setInteger(CoreOptions.COMPACTION_MAX_FILE_NUM, 2);
+    opt.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.parse("1 kb"));
+
+    // changelog compaction
+    opt.setInteger(CoreOptions.NUM_LEVELS, 10);
+    opt.setInteger(CoreOptions.COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT, 10000);
+
+    // producer   default:none
+    opt.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.NONE);
+    opt.set(CoreOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL, Duration.ofSeconds(1));
+    return opt;
   }
 
   public String getCfgString() {
